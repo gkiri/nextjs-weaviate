@@ -15,19 +15,23 @@ import { Messages } from './messages';
 import { VisibilityType } from './visibility-selector';
 import { useBlockSelector } from '@/hooks/use-block';
 
+interface ChatProps {
+  id: string;
+  initialMessages: Array<Message>;
+  selectedModelId: string;
+  selectedVisibilityType: VisibilityType;
+  isReadonly: boolean;
+  mode: 'input' | 'visualization';
+}
+
 export function Chat({
   id,
   initialMessages,
   selectedModelId,
   selectedVisibilityType,
   isReadonly,
-}: {
-  id: string;
-  initialMessages: Array<Message>;
-  selectedModelId: string;
-  selectedVisibilityType: VisibilityType;
-  isReadonly: boolean;
-}) {
+  mode,
+}: ChatProps) {
   const { mutate } = useSWRConfig();
 
   const {
