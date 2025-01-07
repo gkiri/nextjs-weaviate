@@ -2,11 +2,9 @@
 
 import { useChat } from 'ai/react';
 import { useEffect, useRef } from 'react';
-import { BlockKind } from './block';
 import { Suggestion } from '@/lib/db/schema';
-import { initialBlockData, useBlock } from '@/hooks/use-block';
 import { useUserMessageId } from '@/hooks/use-user-message-id';
-import { cx } from 'class-variance-authority';
+import { generateUUID } from '@/lib/utils';
 
 type DataStreamDelta = {
   type:
@@ -18,14 +16,14 @@ type DataStreamDelta = {
     | 'clear'
     | 'finish'
     | 'user-message-id'
-    | 'kind';
+    | 'kind'
+    | 'text';
   content: string | Suggestion;
 };
 
 export function DataStreamHandler({ id }: { id: string }) {
-  const { data: dataStream } = useChat({ id });
+  const { data: dataStream, setMessages } = useChat({ id });
   const { setUserMessageIdFromServer } = useUserMessageId();
-  const { setBlock } = useBlock();
   const lastProcessedIndex = useRef(-1);
 
   useEffect(() => {
@@ -34,84 +32,86 @@ export function DataStreamHandler({ id }: { id: string }) {
     const newDeltas = dataStream.slice(lastProcessedIndex.current + 1);
     lastProcessedIndex.current = dataStream.length - 1;
 
-    (newDeltas as DataStreamDelta[]).forEach((delta: DataStreamDelta) => {
+    newDeltas.forEach((delta: DataStreamDelta) => {
+      console.log('Received delta:', delta); // Debugging log
+
       if (delta.type === 'user-message-id') {
         setUserMessageIdFromServer(delta.content as string);
         return;
       }
 
-      setBlock((draftBlock) => {
-        if (!draftBlock) {
-          return { ...initialBlockData, status: 'streaming' };
-        }
+      switch (delta.type) {
+        case 'text-delta':
+          setMessages((prevMessages) => {
+            if (prevMessages.length === 0) {
+              console.log('Appending new assistant message with text-delta'); // Debugging log
+              return [
+                {
+                  id: generateUUID(),
+                  role: 'assistant',
+                  content: delta.content as string,
+                  createdAt: new Date(),
+                },
+              ];
+            }
 
-        switch (delta.type) {
-          case 'id':
-            return {
-              ...draftBlock,
-              documentId: delta.content as string,
-              status: 'streaming',
-            };
+            const lastMessage = prevMessages[prevMessages.length - 1];
+            if (lastMessage.role === 'assistant') {
+              console.log('Appending to existing assistant message'); // Debugging log
+              return [
+                ...prevMessages.slice(0, -1),
+                {
+                  ...lastMessage,
+                  content: lastMessage.content + (delta.content as string),
+                },
+              ];
+            } else {
+              console.log('Appending new assistant message'); // Debugging log
+              return [
+                ...prevMessages,
+                {
+                  id: generateUUID(),
+                  role: 'assistant',
+                  content: delta.content as string,
+                  createdAt: new Date(),
+                },
+              ];
+            }
+          });
+          break;
 
-          case 'title':
-            return {
-              ...draftBlock,
-              title: delta.content as string,
-              status: 'streaming',
-            };
+        case 'text':
+          setMessages((prevMessages) => {
+            console.log('Appending complete assistant message with text'); // Debugging log
+            return [
+              ...prevMessages,
+              {
+                id: generateUUID(),
+                role: 'assistant',
+                content: delta.content as string,
+                createdAt: new Date(),
+              },
+            ];
+          });
+          break;
 
-          case 'kind':
-            return {
-              ...draftBlock,
-              kind: delta.content as BlockKind,
-              status: 'streaming',
-            };
+        case 'suggestion':
+          // Handle suggestions if necessary
+          console.log('Suggestion received:', delta.content); // Debugging log
+          break;
 
-          case 'text-delta':
-            return {
-              ...draftBlock,
-              content: draftBlock.content + (delta.content as string),
-              isVisible:
-                draftBlock.status === 'streaming' &&
-                draftBlock.content.length > 400 &&
-                draftBlock.content.length < 450
-                  ? true
-                  : draftBlock.isVisible,
-              status: 'streaming',
-            };
+        case 'finish':
+          // Optional: Handle any finalization if necessary
+          console.log('Streaming finished'); // Debugging log
+          break;
 
-          case 'code-delta':
-            return {
-              ...draftBlock,
-              content: delta.content as string,
-              isVisible:
-                draftBlock.status === 'streaming' &&
-                draftBlock.content.length > 300 &&
-                draftBlock.content.length < 310
-                  ? true
-                  : draftBlock.isVisible,
-              status: 'streaming',
-            };
-
-          case 'clear':
-            return {
-              ...draftBlock,
-              content: '',
-              status: 'streaming',
-            };
-
-          case 'finish':
-            return {
-              ...draftBlock,
-              status: 'idle',
-            };
-
-          default:
-            return draftBlock;
-        }
-      });
+        // Handle other delta types if needed
+        default:
+          console.log('Unhandled delta type:', delta.type); // Debugging log
+          break;
+      }
     });
-  }, [dataStream, setBlock, setUserMessageIdFromServer]);
+  }, [dataStream, setMessages, setUserMessageIdFromServer]);
 
   return null;
 }
